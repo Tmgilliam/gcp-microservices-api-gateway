@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<RaiseFault name="Transform-Error">
+  <DisplayName>Standardize Error Response</DisplayName>
+  <FaultResponse>
+    <Set>
+      <Headers>
+        <Header name="Content-Type">application/json</Header>
+        <Header name="X-Request-ID">{request.header.X-Request-ID}</Header>
+      </Headers>
+      <Payload contentType="application/json">
+{
+  "error_code": "{fault.name}",
+  "message": "{fault.faultstring}",
+  "request_id": "{request.header.X-Request-ID}",
+  "timestamp": "{system.timestamp}"
+}
+      </Payload>
+      <StatusCode>500</StatusCode>
+      <ReasonPhrase>Internal Server Error</ReasonPhrase>
+    </Set>
+  </FaultResponse>
+</RaiseFault>

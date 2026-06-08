@@ -1,0 +1,82 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<ProxyEndpoint name="default">
+  <Description>ERP AI Delay Risk API Gateway</Description>
+  <PreFlow name="PreFlow">
+    <Request>
+      <Step>
+        <Name>Assign-Request-ID</Name>
+      </Step>
+      <Step>
+        <Name>Verify-API-Key</Name>
+      </Step>
+      <Step>
+        <Name>Quota-Standard</Name>
+      </Step>
+      <Step>
+        <Name>Spike-Arrest</Name>
+      </Step>
+    </Request>
+  </PreFlow>
+  <Flows>
+    <Flow name="ScoreSingle">
+      <Description>POST /v1/score — single entity risk scoring</Description>
+      <Condition>(proxy.pathsuffix MatchesPath "/score") and (request.verb = "POST")</Condition>
+      <Request/>
+      <Response/>
+    </Flow>
+    <Flow name="ScoreBatch">
+      <Description>POST /v1/score/batch — bulk risk scoring</Description>
+      <Condition>(proxy.pathsuffix MatchesPath "/score/batch") and (request.verb = "POST")</Condition>
+      <Request/>
+      <Response/>
+    </Flow>
+    <Flow name="GetFeatures">
+      <Description>GET /v1/features/{entity_id}</Description>
+      <Condition>(proxy.pathsuffix MatchesPath "/features/*") and (request.verb = "GET")</Condition>
+      <Request/>
+      <Response/>
+    </Flow>
+    <Flow name="FeaturesBatch">
+      <Description>POST /v1/features/batch</Description>
+      <Condition>(proxy.pathsuffix MatchesPath "/features/batch") and (request.verb = "POST")</Condition>
+      <Request/>
+      <Response/>
+    </Flow>
+    <Flow name="Notify">
+      <Description>POST /v1/notify — internal notification trigger</Description>
+      <Condition>(proxy.pathsuffix MatchesPath "/notify") and (request.verb = "POST")</Condition>
+      <Request/>
+      <Response/>
+    </Flow>
+    <Flow name="Health">
+      <Description>GET /health — service health check</Description>
+      <Condition>(proxy.pathsuffix MatchesPath "/health") and (request.verb = "GET")</Condition>
+      <Request/>
+      <Response/>
+    </Flow>
+  </Flows>
+  <HTTPProxyConnection>
+    <BasePath>/v1</BasePath>
+    <VirtualHost>default</VirtualHost>
+  </HTTPProxyConnection>
+  <RouteRule name="route-to-scoring">
+    <Condition>proxy.pathsuffix MatchesPath "/score"</Condition>
+    <TargetEndpoint>risk-scoring-target</TargetEndpoint>
+  </RouteRule>
+  <RouteRule name="route-to-scoring-batch">
+    <Condition>proxy.pathsuffix MatchesPath "/score/batch"</Condition>
+    <TargetEndpoint>risk-scoring-target</TargetEndpoint>
+  </RouteRule>
+  <RouteRule name="route-to-features">
+    <Condition>proxy.pathsuffix MatchesPath "/features/**"</Condition>
+    <TargetEndpoint>feature-service-target</TargetEndpoint>
+  </RouteRule>
+  <RouteRule name="route-to-notification">
+    <Condition>proxy.pathsuffix MatchesPath "/notify"</Condition>
+    <TargetEndpoint>notification-target</TargetEndpoint>
+  </RouteRule>
+  <RouteRule name="route-to-health">
+    <Condition>proxy.pathsuffix MatchesPath "/health"</Condition>
+    <TargetEndpoint>risk-scoring-target</TargetEndpoint>
+  </RouteRule>
+</ProxyEndpoint>

@@ -1,0 +1,698 @@
+openapi: 3.0.3
+info:
+  title: ERP AI Delay Risk API
+  description: |
+    Enterprise API for supply-chain delay risk scoring, feature retrieval,
+    and high-risk notifications. Governed by Apigee API Gateway.
+
+    **Authentication:** API key required in `X-API-Key` header.
+    **Rate Limit:** 100 requests/minute per API key (standard tier).
+    **Versioning:** URI-based — all routes prefixed with `/v1/`.
+
+    **Architect:** Dr. Tatianna Gilliam — Cloud & AI Architect (AZ-305 | AI-102 | AZ-104)
+  version: 1.0.0
+  contact:
+    name: API Platform Team
+    email: api-platform@example.com
+  license:
+    name: Proprietary
+
+servers:
+  - url: https://api.delayrisk.example.com/v1
+    description: Production (Apigee)
+  - url: https://api-staging.delayrisk.example.com/v1
+    description: Staging
+
+security:
+  - ApiKeyAuth: []
+
+tags:
+  - name: Scoring
+    description: Risk scoring operations
+  - name: Features
+    description: Entity feature retrieval
+  - name: Notifications
+    description: High-risk alert triggers (internal)
+  - name: Health
+    description: Service health and dependency status
+
+paths:
+  /score:
+    post:
+      tags: [Scoring]
+      summary: Score single entity delay risk
+      description: |
+        Retrieves features for the entity (unless overridden), runs ML inference,
+        and returns a delay-risk score. Idempotent for the same `entity_id` +
+        feature set — safe to retry on transient failures.
+
+        High-risk scores (`risk_level: high`) trigger async notification via Pub/Sub.
+      operationId: scoreSingle
+      parameters:
+        - $ref: '#/components/parameters/RequestIdHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ScoreRequest'
+            examples:
+              standard:
+                summary: Score with Feature Service lookup
+                value:
+                  entity_id: PO-88421
+              withOverride:
+                summary: Score with feature override
+                value:
+                  entity_id: PO-88421
+                  features:
+                    supplier_lead_time_days: 45
+                    historical_delay_rate: 0.32
+                    inventory_coverage_days: 12
+                    order_value_usd: 125000
+                    seasonality_index: 1.4
+      responses:
+        '200':
+          description: Risk score computed successfully
+          headers:
+            X-Request-ID:
+              $ref: '#/components/headers/X-Request-ID'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/X-RateLimit-Remaining'
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/X-RateLimit-Limit'
+            X-Latency-Ms:
+              $ref: '#/components/headers/X-Latency-Ms'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ScoreResponse'
+              examples:
+                highRisk:
+                  summary: High delay risk
+                  value:
+                    entity_id: PO-88421
+                    risk_score: 0.87
+                    risk_level: high
+                    confidence: 0.92
+                    feature_source: feature_service
+                    request_id: req_a1b2c3d4e5f6
+                    timestamp: '2026-06-08T14:32:00Z'
+                degraded:
+                  summary: Degraded — cached features
+                  value:
+                    entity_id: PO-88421
+                    risk_score: 0.71
+                    risk_level: high
+                    confidence: 0.78
+                    feature_source: cache
+                    request_id: req_f6e5d4c3b2a1
+                    timestamp: '2026-06-08T14:35:00Z'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+  /score/batch:
+    post:
+      tags: [Scoring]
+      summary: Bulk risk scoring
+      description: |
+        Score multiple entities in a single request. Set `async: true` to receive
+        a `job_id` for polling; omit or set `async: false` for synchronous results.
+      operationId: scoreBatch
+      parameters:
+        - $ref: '#/components/parameters/RequestIdHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BatchScoreRequest'
+            examples:
+              sync:
+                summary: Synchronous batch
+                value:
+                  records:
+                    - entity_id: PO-88421
+                    - entity_id: PO-88422
+                  async: false
+              async:
+                summary: Async batch job
+                value:
+                  records:
+                    - entity_id: PO-88421
+                    - entity_id: PO-88422
+                    - entity_id: PO-88423
+                  async: true
+      responses:
+        '200':
+          description: Batch scoring completed or job queued
+          headers:
+            X-Request-ID:
+              $ref: '#/components/headers/X-Request-ID'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/X-RateLimit-Remaining'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BatchScoreResponse'
+              examples:
+                sync:
+                  summary: Synchronous results
+                  value:
+                    results:
+                      - entity_id: PO-88421
+                        risk_score: 0.87
+                        risk_level: high
+                        confidence: 0.92
+                        feature_source: feature_service
+                        request_id: req_batch001
+                        timestamp: '2026-06-08T14:32:00Z'
+                      - entity_id: PO-88422
+                        risk_score: 0.34
+                        risk_level: low
+                        confidence: 0.88
+                        feature_source: feature_service
+                        request_id: req_batch001
+                        timestamp: '2026-06-08T14:32:00Z'
+                    request_id: req_batch001
+                    timestamp: '2026-06-08T14:32:00Z'
+                async:
+                  summary: Async job queued
+                  value:
+                    job_id: job_7f3a9b2c1d0e
+                    request_id: req_batch002
+                    timestamp: '2026-06-08T14:33:00Z'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+
+  /features/{entity_id}:
+    get:
+      tags: [Features]
+      summary: Retrieve features for an entity
+      description: |
+        Returns the online feature vector for a single entity. Backed by
+        Vertex AI Feature Store in production; local cache in portfolio demo.
+      operationId: getFeatures
+      parameters:
+        - $ref: '#/components/parameters/EntityId'
+        - $ref: '#/components/parameters/RequestIdHeader'
+      responses:
+        '200':
+          description: Feature vector retrieved
+          headers:
+            X-Request-ID:
+              $ref: '#/components/headers/X-Request-ID'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/X-RateLimit-Remaining'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FeatureResponse'
+              example:
+                entity_id: PO-88421
+                features:
+                  supplier_lead_time_days: 45
+                  historical_delay_rate: 0.32
+                  inventory_coverage_days: 12
+                  order_value_usd: 125000
+                  seasonality_index: 1.4
+                last_updated: '2026-06-08T12:00:00Z'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+
+  /features/batch:
+    post:
+      tags: [Features]
+      summary: Bulk feature retrieval
+      description: Retrieve feature vectors for multiple entities in one request.
+      operationId: getFeaturesBatch
+      parameters:
+        - $ref: '#/components/parameters/RequestIdHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BatchFeatureRequest'
+            example:
+              entity_ids:
+                - PO-88421
+                - PO-88422
+                - PO-88423
+      responses:
+        '200':
+          description: Feature vectors retrieved
+          headers:
+            X-Request-ID:
+              $ref: '#/components/headers/X-Request-ID'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/X-RateLimit-Remaining'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BatchFeatureResponse'
+              example:
+                features:
+                  - entity_id: PO-88421
+                    features:
+                      supplier_lead_time_days: 45
+                      historical_delay_rate: 0.32
+                    last_updated: '2026-06-08T12:00:00Z'
+                  - entity_id: PO-88422
+                    features:
+                      supplier_lead_time_days: 21
+                      historical_delay_rate: 0.08
+                    last_updated: '2026-06-08T12:00:00Z'
+                request_id: req_feat_batch01
+                timestamp: '2026-06-08T14:32:00Z'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+
+  /notify:
+    post:
+      tags: [Notifications]
+      summary: Trigger high-risk notification (internal)
+      description: |
+        Internal endpoint — triggers notification delivery for a high-risk entity.
+        Typically invoked by Pub/Sub push subscription, not direct API consumers.
+        Requires internal API key tier.
+      operationId: notifyHighRisk
+      parameters:
+        - $ref: '#/components/parameters/RequestIdHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/NotifyRequest'
+            example:
+              entity_id: PO-88421
+              risk_score: 0.87
+              risk_level: high
+              channels:
+                - email
+                - webhook
+      responses:
+        '202':
+          description: Notification accepted for delivery
+          headers:
+            X-Request-ID:
+              $ref: '#/components/headers/X-Request-ID'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NotifyResponse'
+              example:
+                notification_id: notif_9x8y7z6w5v4u
+                status: accepted
+                entity_id: PO-88421
+                request_id: req_notify001
+                timestamp: '2026-06-08T14:32:05Z'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /health:
+    get:
+      tags: [Health]
+      summary: Service health check
+      description: |
+        Returns service health and dependency status. Used by Cloud Run
+        readiness probes and Apigee health monitors.
+      operationId: healthCheck
+      security: []
+      responses:
+        '200':
+          description: Service is healthy or degraded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+              examples:
+                healthy:
+                  summary: All dependencies healthy
+                  value:
+                    status: healthy
+                    service: risk-scoring-service
+                    dependencies:
+                      feature_service: healthy
+                    timestamp: '2026-06-08T14:32:00Z'
+                degraded:
+                  summary: Dependency degraded
+                  value:
+                    status: degraded
+                    service: risk-scoring-service
+                    dependencies:
+                      feature_service: degraded
+                    circuit_breaker_state: open
+                    timestamp: '2026-06-08T14:35:00Z'
+
+components:
+  securitySchemes:
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-Key
+      description: |
+        API key issued via the Apigee Developer Portal.
+        Standard tier: 100 req/min. Enterprise tier: 1000 req/min.
+
+  parameters:
+    EntityId:
+      name: entity_id
+      in: path
+      required: true
+      description: Unique entity identifier (purchase order, shipment, etc.)
+      schema:
+        type: string
+        example: PO-88421
+    RequestIdHeader:
+      name: X-Request-ID
+      in: header
+      required: false
+      description: Client-supplied correlation ID for distributed tracing
+      schema:
+        type: string
+        example: req_a1b2c3d4e5f6
+
+  headers:
+    X-Request-ID:
+      description: Correlation ID for the request
+      schema:
+        type: string
+        example: req_a1b2c3d4e5f6
+    X-RateLimit-Remaining:
+      description: Remaining requests in the current rate limit window
+      schema:
+        type: integer
+        example: 87
+    X-RateLimit-Limit:
+      description: Maximum requests allowed per window
+      schema:
+        type: integer
+        example: 100
+    X-Latency-Ms:
+      description: Server-side processing latency in milliseconds
+      schema:
+        type: number
+        example: 142.5
+
+  schemas:
+    ScoreRequest:
+      type: object
+      required: [entity_id]
+      properties:
+        entity_id:
+          type: string
+          description: Entity to score
+          example: PO-88421
+        features:
+          type: object
+          additionalProperties: true
+          description: Optional feature override — bypasses Feature Service lookup
+          example:
+            supplier_lead_time_days: 45
+            historical_delay_rate: 0.32
+
+    ScoreResponse:
+      type: object
+      required:
+        - entity_id
+        - risk_score
+        - risk_level
+        - confidence
+        - feature_source
+        - request_id
+        - timestamp
+      properties:
+        entity_id:
+          type: string
+        risk_score:
+          type: number
+          format: float
+          minimum: 0
+          maximum: 1
+        risk_level:
+          type: string
+          enum: [low, medium, high]
+        confidence:
+          type: number
+          format: float
+          minimum: 0
+          maximum: 1
+        feature_source:
+          type: string
+          enum: [feature_service, cache, override]
+        request_id:
+          type: string
+        timestamp:
+          type: string
+          format: date-time
+
+    BatchScoreRequest:
+      type: object
+      required: [records]
+      properties:
+        records:
+          type: array
+          minItems: 1
+          maxItems: 500
+          items:
+            type: object
+            required: [entity_id]
+            properties:
+              entity_id:
+                type: string
+              features:
+                type: object
+                additionalProperties: true
+        async:
+          type: boolean
+          default: false
+          description: If true, returns job_id for async processing
+
+    BatchScoreResponse:
+      type: object
+      required: [request_id, timestamp]
+      properties:
+        job_id:
+          type: string
+          description: Present when async=true
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/ScoreResponse'
+        request_id:
+          type: string
+        timestamp:
+          type: string
+          format: date-time
+
+    FeatureResponse:
+      type: object
+      required: [entity_id, features, last_updated]
+      properties:
+        entity_id:
+          type: string
+        features:
+          type: object
+          additionalProperties: true
+        last_updated:
+          type: string
+          format: date-time
+
+    BatchFeatureRequest:
+      type: object
+      required: [entity_ids]
+      properties:
+        entity_ids:
+          type: array
+          minItems: 1
+          maxItems: 500
+          items:
+            type: string
+
+    BatchFeatureResponse:
+      type: object
+      required: [features, request_id, timestamp]
+      properties:
+        features:
+          type: array
+          items:
+            $ref: '#/components/schemas/FeatureResponse'
+        request_id:
+          type: string
+        timestamp:
+          type: string
+          format: date-time
+
+    NotifyRequest:
+      type: object
+      required: [entity_id, risk_score, risk_level]
+      properties:
+        entity_id:
+          type: string
+        risk_score:
+          type: number
+          format: float
+        risk_level:
+          type: string
+          enum: [low, medium, high]
+        channels:
+          type: array
+          items:
+            type: string
+            enum: [email, webhook, teams, sms]
+          default: [email]
+
+    NotifyResponse:
+      type: object
+      required: [notification_id, status, entity_id, request_id, timestamp]
+      properties:
+        notification_id:
+          type: string
+        status:
+          type: string
+          enum: [accepted, delivered, failed]
+        entity_id:
+          type: string
+        request_id:
+          type: string
+        timestamp:
+          type: string
+          format: date-time
+
+    HealthResponse:
+      type: object
+      required: [status, service, dependencies, timestamp]
+      properties:
+        status:
+          type: string
+          enum: [healthy, degraded, unhealthy]
+        service:
+          type: string
+        dependencies:
+          type: object
+          additionalProperties:
+            type: string
+            enum: [healthy, degraded, unhealthy]
+        circuit_breaker_state:
+          type: string
+          enum: [closed, open, half_open]
+        timestamp:
+          type: string
+          format: date-time
+
+    ErrorResponse:
+      type: object
+      required: [error_code, message, request_id, timestamp]
+      properties:
+        error_code:
+          type: string
+          description: Machine-readable error identifier
+          example: RATE_LIMIT_EXCEEDED
+        message:
+          type: string
+          description: Human-readable error description
+          example: Rate limit exceeded. Retry after 42 seconds.
+        request_id:
+          type: string
+          example: req_a1b2c3d4e5f6
+        timestamp:
+          type: string
+          format: date-time
+          example: '2026-06-08T14:32:00Z'
+        details:
+          type: object
+          additionalProperties: true
+          description: Optional structured error context
+
+  responses:
+    BadRequest:
+      description: Invalid request
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            error_code: INVALID_REQUEST
+            message: entity_id is required
+            request_id: req_a1b2c3d4e5f6
+            timestamp: '2026-06-08T14:32:00Z'
+    Unauthorized:
+      description: Missing or invalid API key
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            error_code: UNAUTHORIZED
+            message: Invalid or missing API key
+            request_id: req_a1b2c3d4e5f6
+            timestamp: '2026-06-08T14:32:00Z'
+    NotFound:
+      description: Entity not found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            error_code: ENTITY_NOT_FOUND
+            message: No features found for entity PO-99999
+            request_id: req_a1b2c3d4e5f6
+            timestamp: '2026-06-08T14:32:00Z'
+    RateLimited:
+      description: Rate limit exceeded
+      headers:
+        Retry-After:
+          description: Seconds until the rate limit resets
+          schema:
+            type: integer
+            example: 42
+        X-RateLimit-Remaining:
+          schema:
+            type: integer
+            example: 0
+        X-RateLimit-Limit:
+          schema:
+            type: integer
+            example: 100
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            error_code: RATE_LIMIT_EXCEEDED
+            message: Rate limit exceeded. Standard tier allows 100 req/min.
+            request_id: req_a1b2c3d4e5f6
+            timestamp: '2026-06-08T14:32:00Z'
+    ServiceUnavailable:
+      description: Upstream dependency unavailable
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            error_code: FEATURE_SERVICE_UNAVAILABLE
+            message: Feature Service unavailable and no cached features
+            request_id: req_a1b2c3d4e5f6
+            timestamp: '2026-06-08T14:32:00Z'
