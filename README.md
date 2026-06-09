@@ -3,6 +3,9 @@
 **ERP AI Delay Risk Platform — Phase 2 Architecture**  
 **Architect:** Dr. Tatianna Gilliam — Cloud & AI Architect (AZ-305 | AI-102 | AZ-104)
 
+> **Public repo:** [github.com/Tmgilliam/gcp-microservices-api-gateway](https://github.com/Tmgilliam/gcp-microservices-api-gateway)  
+> **Monorepo copy:** [MTP-Projects/gcp-microservices-api-gateway](https://github.com/Tmgilliam/MTP-Projects/tree/main/gcp-microservices-api-gateway)
+
 ---
 
 ## Overview
